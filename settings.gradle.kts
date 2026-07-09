@@ -1,1 +1,1 @@
-rootProject.name = "AuthEveryDay-G"
+rootProject.name = "AuthEveryDay"
