@@ -1,0 +1,15 @@
+name: AuthEveryDay-G
+version: '${version}'
+
+main: org.alc.authEveryDayG.AuthEveryDayG
+api-version: '26.2'
+load: POSTWORLD
+  
+commands:
+  register:
+    description: "Регистрация аккаунта"
+  login:
+    description: "Вход в аккаунт"
+  2fa:
+    description: "Управление двухфакторной аутентификацией"
+    aliases: [twofa]
