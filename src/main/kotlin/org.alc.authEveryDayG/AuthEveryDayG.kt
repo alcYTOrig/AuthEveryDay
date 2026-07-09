@@ -25,9 +25,29 @@ class AuthEveryDayG : JavaPlugin() {
     val lastDisconnectTimes: MutableMap<UUID, Long> = Collections.synchronizedMap(HashMap())
 
     override fun onEnable() {
-        saveDefaultConfig()
+        if (!dataFolder.exists()) {
+            logger.info("Создание основной папки конфигурации: \${dataFolder.name}")
+            dataFolder.mkdirs()
+        }
+
+        var configFile = java.io.File(dataFolder, "config.yaml")
+        if (!configFile.exists()) {
+            logger.info("Файл config.yml не найден на диске. Попытка извлечения из JAR...")
+            runCatching {
+                getResource("config.yml")?.use { inputStream ->
+                    configFile.outputStream().use { outputStream ->
+                        inputStream.copyTo(outputStream)
+                    }
+                } ?: logger.severe("❌ КРИТИЧЕСКАЯ ОШИБКА: Файл config.yml отсутствует внутри собранного JAR файла плагина!")
+            }.onFailure {
+                logger.severe("❌ Не удалось записать config.yml на диск: ${it.message}")
+            }
+        }
+
+        reloadConfig()
 
         if (!initDatabase()) {
+            logger.severe("Выключение плагина из-за критической ошибки SQLite!")
             server.pluginManager.disablePlugin(this)
             return
         }
