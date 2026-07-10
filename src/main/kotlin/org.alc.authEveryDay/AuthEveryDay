@@ -1,0 +1,120 @@
+package org.alc.authEveryDay
+
+import net.dv8tion.jda.api.JDA
+import net.dv8tion.jda.api.JDABuilder
+import net.dv8tion.jda.api.requests.GatewayIntent
+import org.bukkit.plugin.java.JavaPlugin
+import java.io.File
+import java.sql.Connection
+import java.sql.DriverManager
+import java.util.*
+
+class AuthEveryDay : JavaPlugin() {
+
+    var dbConnection: Connection? = null
+        private set
+    var jda: JDA? = null
+        private set
+
+    val authenticatedPlayers: MutableSet<UUID> = Collections.synchronizedSet(HashSet())
+
+    // Сессии для Discord (UUID игрока -> ID сообщения с кнопками)
+    val pending2FA: MutableMap<UUID, String> = Collections.synchronizedMap(HashMap())
+
+    // Сессии для Authenticator App (UUID игрока -> Временный сгенерированный секрет при первой привязке)
+    val pendingTOTPSetup: MutableMap<UUID, String> = Collections.synchronizedMap(HashMap())
+
+    // Список игроков, от которых сервер прямо сейчас ждет ввода 6-значного кода из приложения
+    val pendingTOTPAuth: MutableSet<UUID> = Collections.synchronizedSet(HashSet())
+
+    val lastDisconnectTimes: MutableMap<UUID, Long> = Collections.synchronizedMap(HashMap())
+
+    fun debugLog(message: String) {
+        if (config.getBoolean("debug", false)) {
+            logger.info("§d[DEBUG] $message")
+        }
+    }
+
+    override fun onEnable() {
+        if (!dataFolder.exists()) dataFolder.mkdirs()
+
+        val configFile = File(dataFolder, "config.yml")
+        if (!configFile.exists()) {
+            runCatching {
+                getResource("config.yml")?.use { inputStream ->
+                    configFile.outputStream().use { outputStream -> inputStream.copyTo(outputStream) }
+                }
+            }
+        }
+        reloadConfig()
+
+        if (!initDatabase()) {
+            logger.severe("Выключение плагина из-за критической ошибки SQLite!")
+            server.pluginManager.disablePlugin(this)
+            return
+        }
+
+        if (config.getBoolean("2fa-enabled", true)) {
+            initDiscordBot()
+        }
+
+        server.pluginManager.registerEvents(PlayerListener(this), this)
+
+        val commands = AuthCommands(this)
+        getCommand("register")?.setExecutor(commands)
+        getCommand("login")?.setExecutor(commands)
+        getCommand("2fa_discord")?.setExecutor(commands)
+        getCommand("2fa_app")?.setExecutor(commands)
+
+        logger.info("AuthEveryDay на Kotlin успешно запущен!")
+    }
+
+    override fun onDisable() {
+        runCatching {
+            dbConnection?.close()
+            jda?.shutdown()
+        }
+    }
+
+    private fun initDatabase(): Boolean {
+        return runCatching {
+            dbConnection = DriverManager.getConnection("jdbc:sqlite:${File(dataFolder, "auth.db")}")
+            dbConnection?.createStatement().use { statement ->
+                // Изменили таблицу: добавлен totp_secret
+                statement?.execute("""
+                    CREATE TABLE IF NOT EXISTS users (
+                        username TEXT PRIMARY KEY,
+                        password_hash TEXT NOT NULL,
+                        discord_id TEXT NOT NULL,
+                        totp_secret TEXT DEFAULT '',
+                        is_enabled INTEGER DEFAULT 1
+                    );
+                """.trimIndent())
+
+                statement?.execute("""
+                    CREATE TABLE IF NOT EXISTS blocked_ips (
+                        ip TEXT PRIMARY KEY,
+                        blocked_by TEXT NOT NULL,
+                        timestamp TEXT NOT NULL
+                    );
+                """.trimIndent())
+            }
+            true
+        }.getOrElse {
+            logger.severe("Ошибка БД: ${it.message}")
+            false
+        }
+    }
+
+    private fun initDiscordBot() {
+        val token = config.getString("discord-token") ?: return
+        runCatching {
+            jda = JDABuilder.createDefault(token)
+                .enableIntents(GatewayIntent.DIRECT_MESSAGES)
+                .addEventListeners(DiscordButtonListener(this))
+                .build().awaitReady()
+        }.onFailure {
+            logger.severe("Ошибка запуска Дискорд бота: ${it.message}")
+        }
+    }
+}
