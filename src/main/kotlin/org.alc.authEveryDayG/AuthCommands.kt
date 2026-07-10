@@ -114,7 +114,10 @@ class AuthCommands(private val plugin: AuthEveryDayG) : CommandExecutor {
         }
     }
 
+    // Замените методы loginPlayer и sendDiscordButtonMessage внутри AuthCommands.kt на эти варианты:
+
     private fun loginPlayer(player: Player, javaPass: String) {
+        plugin.debugLog("Игрок \${player.name} пытается войти (/login)...")
         runCatching {
             val query = "SELECT password_hash, discord_id, is_enabled FROM users WHERE username = ?;"
             plugin.dbConnection?.prepareStatement(query).use { ps ->
@@ -126,19 +129,20 @@ class AuthCommands(private val plugin: AuthEveryDayG) : CommandExecutor {
                     val discordId = rs.getString("discord_id")
                     val isEnabled = rs.getInt("is_enabled") == 1
 
+                    plugin.debugLog("Аккаунт найден в БД. Привязанный Discord ID: $discordId, Статус 2FA: $isEnabled")
+
                     if (savedHash == hashPassword(javaPass)) {
                         if (!isEnabled) {
-                            // Если 2FA выключен пользователем, пускаем сразу
                             plugin.authenticatedPlayers.add(player.uniqueId)
                             player.sendMessage("§6[AuthEveryDayG] §aВход выполнен (2FA отключена).")
+                            plugin.debugLog("Игрок \${player.name} зашел без 2FA (отключено в профиле).")
                             return
                         }
 
-                        // Собираем метаданные для отправки
                         val ip = player.address?.address?.hostAddress ?: "Неизвестно"
-                        val time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
+                        val time = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"))
 
-                        // Запрашиваем геолокацию асинхронно
+                        plugin.debugLog("Пароль верный. Запуск асинхронного сбора GeoIP для IP: $ip")
                         plugin.server.scheduler.runTaskAsynchronously(plugin, Runnable {
                             val location = getGeoLocation(ip)
 
@@ -152,37 +156,61 @@ class AuthCommands(private val plugin: AuthEveryDayG) : CommandExecutor {
                                 Если это вы, нажмите кнопку **Авторизовать** ниже для входа на сервер.
                             """.trimIndent()
 
+                            plugin.debugLog("Отправка сообщения с кнопкой пользователю Discord ID: $discordId")
                             sendDiscordButtonMessage(discordId, messageText, player)
                         })
 
                         player.sendMessage("§6[AuthEveryDayG] §eПароль верен! Подтвердите вход, нажав кнопку в вашем Discord.")
                     } else {
+                        plugin.debugLog("Игрок \${player.name} ввел неверный пароль.")
                         player.sendMessage("§6[AuthEveryDayG] §cНеверный пароль!")
                     }
                 } else {
+                    plugin.debugLog("Игрок \${player.name} не найден в базе данных.")
                     player.sendMessage("§6[AuthEveryDayG] §cВы не зарегистрированы! Используйте /register")
                 }
             }
+        }.onFailure {
+            plugin.debugLog("КРИТИЧЕСКАЯ ОШИБКА В loginPlayer: \${it.message}")
+            it.printStackTrace()
         }
     }
 
     private fun sendDiscordButtonMessage(userId: String, messageText: String, player: Player) {
+        if (plugin.jda == null) {
+            plugin.debugLog("Ошибка отправки: Объект JDA равен null! Бот не подключен к сети.")
+            player.sendMessage("§6[AuthEveryDayG] §cОшибка: Discord-бот плагина сейчас выключен!")
+            return
+        }
+
+        plugin.debugLog("Запрос в Discord API на поиск пользователя с ID: $userId...")
         plugin.jda?.retrieveUserById(userId)?.queue({ user ->
-            user.openPrivateChannel().queue { channel ->
-                // Создаем кнопку с уникальным ID, содержащим UUID игрока
+            plugin.debugLog("Пользователь найден: \${user.name}. Открываем ЛС-канал...")
+
+            user.openPrivateChannel().queue({ channel ->
                 val authButton = Button.success("auth_approve:${player.uniqueId}", "✅ Авторизовать")
 
+
+                plugin.debugLog("ЛС открыто. Отправляем сообщение с кнопкой...")
                 channel.sendMessage(messageText)
                     .setActionRow(authButton)
-                    .queue { sentMessage ->
-                        // Запоминаем ID сообщения, чтобы реагировать только на него
+                    .queue({ sentMessage ->
                         plugin.pending2FA[player.uniqueId] = sentMessage.id
-                    }
-            }
-        }, {
-            player.sendMessage("§6[AuthEveryDayG] §cБот не смог найти ваш Discord ID. Проверьте привязку /2fa <id>")
+                        plugin.debugLog("Сообщение успешно доставлено! ID сообщения в Discord: \${sentMessage.id}")
+                    }, { throwable ->
+                        plugin.debugLog("❌ ОШИБКА ДОСТАВКИ СООБЩЕНИЯ В ЛС: \${throwable.message}")
+                        player.sendMessage("§6[AuthEveryDayG] §cНе удалось отправить кнопку! Откройте ЛС на сервере Discord.")
+                    })
+            }, { throwable ->
+                plugin.debugLog("❌ ОШИБКА ОТКРЫТИЯ ЛС КАНАЛА: \${throwable.message}")
+                player.sendMessage("§6[AuthEveryDayG] §cDiscord запретил открыть ЛС с вами.")
+            })
+        }, { throwable ->
+            plugin.debugLog("❌ ОШИБКА: Пользователь с Discord ID $userId вообще не найден в API Discord: \${throwable.message}")
+            player.sendMessage("§6[AuthEveryDayG] §cУказанный Discord ID не существует!")
         })
     }
+
 
     private fun getGeoLocation(ip: String): String {
         if (ip == "127.0.0.1" || ip.startsWith("192.168.")) return "Локальный хост (Владелец сервера)"
