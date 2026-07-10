@@ -1,7 +1,9 @@
-discord-token: "YOUR_BOT_TOKEN_HERE"
+discord-token: "YOUR_BOT_TOKEN"
 
 # Время сессии в минутах (если игрок перезашел в течение этого времени, 2FA не запрашивается)
 session-duration-minutes: 5
 
 # Включить 2FA принудительно для всех новых игроков сразу при регистрации?
 default-2fa-enabled: true
+
+debug: false
