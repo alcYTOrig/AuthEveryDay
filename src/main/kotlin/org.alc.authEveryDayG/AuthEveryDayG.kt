@@ -17,34 +17,29 @@ class AuthEveryDayG : JavaPlugin() {
         private set
 
     val authenticatedPlayers: MutableSet<UUID> = Collections.synchronizedSet(HashSet())
-
-    // UUID игрока -> ID сообщения в Discord (чтобы одобрять вход только по актуальной кнопке)
     val pending2FA: MutableMap<UUID, String> = Collections.synchronizedMap(HashMap())
-
-    // Управление сессиями: UUID игрока -> Время его последнего выхода (в миллисекундах)
     val lastDisconnectTimes: MutableMap<UUID, Long> = Collections.synchronizedMap(HashMap())
 
-    override fun onEnable() {
-        if (!dataFolder.exists()) {
-            logger.info("Создание основной папки конфигурации: \${dataFolder.name}")
-            dataFolder.mkdirs()
+    // Быстрая функция для дебаг-логов
+    fun debugLog(message: String) {
+        if (config.getBoolean("debug", false)) {
+            logger.info("§d[DEBUG] $message")
         }
+    }
 
-        var configFile = java.io.File(dataFolder, "config.yaml")
+    override fun onEnable() {
+        if (!dataFolder.exists()) dataFolder.mkdirs()
+
+        val configFile = File(dataFolder, "config.yml")
         if (!configFile.exists()) {
-            logger.info("Файл config.yml не найден на диске. Попытка извлечения из JAR...")
             runCatching {
                 getResource("config.yml")?.use { inputStream ->
-                    configFile.outputStream().use { outputStream ->
-                        inputStream.copyTo(outputStream)
-                    }
-                } ?: logger.severe("❌ КРИТИЧЕСКАЯ ОШИБКА: Файл config.yml отсутствует внутри собранного JAR файла плагина!")
-            }.onFailure {
-                logger.severe("❌ Не удалось записать config.yml на диск: ${it.message}")
+                    configFile.outputStream().use { outputStream -> inputStream.copyTo(outputStream) }
+                }
             }
         }
-
         reloadConfig()
+        debugLog("Конфигурация успешно загружена. Статус дебага: TRUE")
 
         if (!initDatabase()) {
             logger.severe("Выключение плагина из-за критической ошибки SQLite!")
@@ -60,18 +55,21 @@ class AuthEveryDayG : JavaPlugin() {
         getCommand("register")?.setExecutor(commands)
         getCommand("login")?.setExecutor(commands)
         getCommand("2fa")?.setExecutor(commands)
+
+        logger.info("AuthEveryDay успешно запущен!")
     }
 
     override fun onDisable() {
         runCatching {
             dbConnection?.close()
+            debugLog("Соединение с БД SQLite закрыто.")
             jda?.shutdown()
+            debugLog("Discord бот отключен.")
         }
     }
 
     private fun initDatabase(): Boolean {
         return runCatching {
-            if (!dataFolder.exists()) dataFolder.mkdirs()
             dbConnection = DriverManager.getConnection("jdbc:sqlite:${File(dataFolder, "auth.db")}")
             dbConnection?.createStatement().use { statement ->
                 statement?.execute("""
@@ -83,18 +81,28 @@ class AuthEveryDayG : JavaPlugin() {
                     );
                 """.trimIndent())
             }
+            debugLog("База данных SQLite успешно инициализирована.")
             true
-        }.getOrElse { false }
+        }.getOrElse {
+            logger.severe("Ошибка БД: ${it.message}")
+            false
+        }
     }
 
     private fun initDiscordBot() {
         val token = config.getString("discord-token") ?: return
+        debugLog("Попытка инициализации JDA с токеном: \${token.take(10)}...")
         runCatching {
             jda = JDABuilder.createDefault(token)
                 .enableIntents(GatewayIntent.DIRECT_MESSAGES)
-                // Добавляем слушатель нажатия кнопок в Discord
                 .addEventListeners(DiscordButtonListener(this))
                 .build().awaitReady()
+
+
+            debugLog("JDA статус: \${jda?.status}. Бот успешно авторизован как: \${jda?.selfUser?.name}#\${jda?.selfUser?.discriminator}")
+        }.onFailure {
+            logger.severe("Ошибка запуска Дискорд бота: ${it.message}")
+            it.printStackTrace()
         }
     }
 }
