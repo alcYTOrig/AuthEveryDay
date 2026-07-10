@@ -4,7 +4,11 @@ discord-token: "YOUR_BOT_TOKEN"
 session-duration-minutes: 5
 auth-timeout-seconds: 60
 
-# Включить 2FA принудительно для всех новых игроков сразу при регистрации?
-default-2fa-enabled: true
+# Глобальное включение 2FA (true — бот работает, кнопки отправляются; false — 2FA полностью отключена, вход только по паролю)
+2fa_enabled: true
+
+# Обязательная 2FA для всех (true — регистрация без Discord запрещена; false — обычный пароль разрешен)
+# Работает ТОЛЬКО если 2fa-enabled выставлен в значение true!
+2fa_only: false
 
 debug: false
