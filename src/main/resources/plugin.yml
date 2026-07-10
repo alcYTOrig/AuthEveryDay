@@ -1,15 +1,17 @@
-name: AuthEveryDay-G
+name: AuthEveryDay
 version: '${version}'
 
-main: org.alc.authEveryDayG.AuthEveryDayG
+main: org.alc.authEveryDay.AuthEveryDay
 api-version: '26.2'
 load: POSTWORLD
-  
+description: '3FA Auth plugin with Discord Buttons, TOTP Apps and SQLite'
+
 commands:
   register:
     description: "Регистрация аккаунта"
   login:
     description: "Вход в аккаунт"
-  2fa:
-    description: "Управление двухфакторной аутентификацией"
-    aliases: [twofa]
+  2fa_discord:
+    description: "Управление защитой через Discord"
+  2fa_app:
+    description: "Управление защитой через Authenticator App"
